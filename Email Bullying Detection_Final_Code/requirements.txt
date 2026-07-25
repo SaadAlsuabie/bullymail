@@ -1,0 +1,13 @@
+Flask
+flask-cors
+Werkzeug
+mysql-connector-python
+pandas
+numpy
+nltk
+scikit-learn
+joblib
+openpyxl
+Faker
+matplotlib
+seaborn
