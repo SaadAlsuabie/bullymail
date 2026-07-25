@@ -23,7 +23,7 @@ These steps get the app running locally with **zero external dependencies** — 
 1. **Clone the repo and enter the project folder**
 
    ```bash
-   git clone <repo-url>
+   git clone https://github.com/SaadAlsuabie/bullymail.git
    cd bullymail/"Email Bullying Detection_Final_Code"
    ```
 
