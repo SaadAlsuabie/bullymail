@@ -1,6 +1,8 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_file
 from flask_cors import CORS
+from werkzeug.security import generate_password_hash, check_password_hash
 import mysql.connector
+import sqlite3
 import pandas as pd
 import numpy as np
 import re
@@ -53,9 +55,13 @@ class Config:
         'host': 'localhost',
         'user': 'root',
         'password': 'root',
-        'database': 'bullymail_db'
+        'database': 'bullymail_db',
+        'connection_timeout': 3
     }
-    
+
+    # Local fallback database used when MySQL is unreachable
+    SQLITE_DB_PATH = 'bullymail.db'
+
     MODEL_PATH = 'saved_models'
     DATASET_PATH = 'datasets'
 
@@ -531,11 +537,23 @@ class EmailAnalyzer:
         self.stop_words = set(stopwords.words('english'))
         self.dataset_generator = EmailDatasetGenerator()
         
+    def anonymize_text(self, text):
+        """Mask PII (email addresses, phone numbers) before any analysis touches the raw text"""
+        if not isinstance(text, str):
+            return text
+
+        text = re.sub(r'[\w\.-]+@[\w\.-]+\.\w+', '[EMAIL]', text)
+        text = re.sub(r'(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b', '[PHONE]', text)
+        return text
+
     def preprocess_text(self, text):
         """Clean and preprocess email text"""
         if not isinstance(text, str):
             return ""
-            
+
+        # Mask PII before any further normalization
+        text = self.anonymize_text(text)
+
         # Convert to lowercase
         text = text.lower()
         # Remove special characters and digits
@@ -834,18 +852,89 @@ class EmailAnalyzer:
             'combined_score': round(combined_score, 3)
         }
 
+class SQLiteCursorWrapper:
+    """Wraps a sqlite3 cursor so it accepts MySQL-flavored SQL from the rest of the app"""
+
+    def __init__(self, cursor, dictionary=False):
+        self._cursor = cursor
+        self.dictionary = dictionary
+
+    @staticmethod
+    def _translate_query(query):
+        translated = query
+        # id INT AUTO_INCREMENT PRIMARY KEY -> id INTEGER PRIMARY KEY AUTOINCREMENT
+        translated = re.sub(
+            r'(\w+)\s+INT\s+AUTO_INCREMENT\s+PRIMARY\s+KEY',
+            r'\1 INTEGER PRIMARY KEY AUTOINCREMENT',
+            translated, flags=re.IGNORECASE
+        )
+        translated = re.sub(r'AUTO_INCREMENT', 'AUTOINCREMENT', translated, flags=re.IGNORECASE)
+        translated = re.sub(r'INSERT\s+IGNORE\s+INTO', 'INSERT OR IGNORE INTO', translated, flags=re.IGNORECASE)
+        translated = re.sub(
+            r"DATE_SUB\(NOW\(\)\s*,\s*INTERVAL\s+(\d+)\s+DAY\)",
+            r"datetime('now', '-\1 days')",
+            translated, flags=re.IGNORECASE
+        )
+        translated = re.sub(r'\bNOW\(\)', 'CURRENT_TIMESTAMP', translated, flags=re.IGNORECASE)
+        translated = translated.replace('%s', '?')
+        return translated
+
+    def execute(self, query, params=None):
+        translated = self._translate_query(query)
+        if params is None:
+            self._cursor.execute(translated)
+        else:
+            self._cursor.execute(translated, params)
+        return self
+
+    def fetchall(self):
+        rows = self._cursor.fetchall()
+        return [dict(row) for row in rows] if self.dictionary else rows
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        if row is None:
+            return None
+        return dict(row) if self.dictionary else row
+
+    def close(self):
+        self._cursor.close()
+
+
+class DBWrapper:
+    """Wraps a sqlite3 connection so it exposes the same interface app.py uses for mysql.connector"""
+
+    def __init__(self, sqlite_conn):
+        self._conn = sqlite_conn
+
+    def cursor(self, dictionary=False):
+        self._conn.row_factory = sqlite3.Row if dictionary else None
+        return SQLiteCursorWrapper(self._conn.cursor(), dictionary=dictionary)
+
+    def commit(self):
+        self._conn.commit()
+
+    def close(self):
+        self._conn.close()
+
+
 # Initialize components
 analyzer = EmailAnalyzer()
 email_integration = EmailIntegration()
 
 def get_db_connection():
-    """Create database connection"""
+    """Create database connection, falling back to a local SQLite file if MySQL is unavailable"""
     try:
         conn = mysql.connector.connect(**Config.DB_CONFIG)
         return conn
     except Exception as e:
-        print(f"Database connection error: {e}")
-        return None
+        print(f"MySQL connection failed ({e}), falling back to local SQLite database")
+        try:
+            sqlite_conn = sqlite3.connect(Config.SQLITE_DB_PATH)
+            return DBWrapper(sqlite_conn)
+        except Exception as sqlite_error:
+            print(f"SQLite fallback connection error: {sqlite_error}")
+            return None
 
 def init_database():
     """Initialize database tables"""
@@ -925,11 +1014,12 @@ def init_database():
             )
         ''')
         
-        # Create default admin user
+        # Create default admin user with a securely hashed password
+        admin_password_hash = generate_password_hash('admin123', method='scrypt')
         cursor.execute('''
-            INSERT IGNORE INTO users (username, password, role) 
-            VALUES ('admin', 'admin123', 'admin')
-        ''')
+            INSERT IGNORE INTO users (username, password, role)
+            VALUES (%s, %s, %s)
+        ''', ('admin', admin_password_hash, 'admin'))
         
         conn.commit()
         cursor.close()
@@ -956,16 +1046,28 @@ def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        
-        # Simple authentication
-        if username == 'admin' and password == 'admin123':
-            session['user_id'] = 1
-            session['username'] = username
-            session['role'] = 'admin'
-            return redirect(url_for('dashboard'))
-        else:
-            return render_template('login.html', error='Invalid credentials')
-    
+
+        conn = get_db_connection()
+        if conn is None:
+            return render_template('login.html', error='Database connection failed')
+
+        try:
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute('SELECT * FROM users WHERE username = %s', (username,))
+            user = cursor.fetchone()
+            cursor.close()
+            conn.close()
+
+            if user and check_password_hash(user['password'], password):
+                session['user_id'] = user['id']
+                session['username'] = user['username']
+                session['role'] = user['role']
+                return redirect(url_for('dashboard'))
+            else:
+                return render_template('login.html', error='Invalid credentials')
+        except Exception as e:
+            return render_template('login.html', error=f'Login failed: {str(e)}')
+
     return render_template('login.html')
 
 @app.route('/logout')

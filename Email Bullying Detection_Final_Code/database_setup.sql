@@ -136,8 +136,9 @@ CREATE TABLE `users` (
 
 /*Data for the table `users` */
 
-insert  into `users`(`id`,`username`,`password`,`role`,`created_at`) values 
-(1,'admin','admin123','admin','2025-11-13 16:37:40');
+insert  into `users`(`id`,`username`,`password`,`role`,`created_at`) values
+(1,'admin','scrypt:32768:8:1$LuVefWnmvxrZV64w$d1950c7cf676557f506ae8cd5c839b60cb28f2835754a86b0f5d641ccbf383eb967e00c6490c4c33ade6fa6c2ced30ef2a060f5e90bacc724fff0b68241006da','admin','2025-11-13 16:37:40');
+-- Password hash is werkzeug generate_password_hash('admin123', method='scrypt'); default login remains admin/admin123
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
 /*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
