@@ -1,5 +1,7 @@
 # Python
 venv/
+*.db
+!database_setup.sql
 *.pyc
 __pycache__/
 *.egg-info/

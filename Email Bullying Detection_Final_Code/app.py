@@ -800,13 +800,20 @@ class EmailAnalyzer:
                 model_path = os.path.join(Config.MODEL_PATH, 'latest_model.joblib')
                 vectorizer_path = os.path.join(Config.MODEL_PATH, 'latest_vectorizer.joblib')
             else:
-                # Find the most recent model of specified type
-                model_files = [f for f in os.listdir(Config.MODEL_PATH) 
-                             if f.startswith(model_type) and f.endswith('.joblib')]
+                # Find the most recent model of specified type (case-insensitive,
+                # since files are saved as "SVM_..."/"Logistic Regression_..." but
+                # the UI passes lowercase type names like 'svm'/'logistic')
+                model_files = [f for f in os.listdir(Config.MODEL_PATH)
+                             if f.lower().startswith(model_type.lower()) and f.endswith('.joblib')]
                 if not model_files:
                     return False
-                model_path = os.path.join(Config.MODEL_PATH, sorted(model_files)[-1])
-                vectorizer_path = model_path.replace(model_type, 'vectorizer')
+                chosen_file = sorted(model_files)[-1]
+                # The vectorizer shares the model's timestamp, not its type name
+                timestamp_match = re.search(r'(\d{8}_\d{6})\.joblib$', chosen_file)
+                if not timestamp_match:
+                    return False
+                model_path = os.path.join(Config.MODEL_PATH, chosen_file)
+                vectorizer_path = os.path.join(Config.MODEL_PATH, f'vectorizer_{timestamp_match.group(1)}.joblib')
             
             if os.path.exists(model_path) and os.path.exists(vectorizer_path):
                 self.model = joblib.load(model_path)
