@@ -1584,7 +1584,8 @@ if __name__ == '__main__':
     if init_database():
         print("Starting BullyMail Application...")
         print("Access the application at: http://localhost:5000")
-        print("Admin login: admin / admin123")
+        print("Admin login username: admin (password is stored as a salted scrypt hash;")
+        print("the default is documented in the README and should be changed before deployment).")
         app.run(debug=True, host='0.0.0.0', port=5000)
     else:
         print("Failed to initialize database. Please check your MySQL configuration.")
