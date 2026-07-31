@@ -1,6 +1,6 @@
 # BullyMail — Email Bullying Detection
 
-A Flask web app that flags potentially bullying language in email text, with an academic / university-email focus. It combines **TF–IDF + machine learning** (logistic regression or linear SVM) with **phrase-based rules**, stores results in **MySQL** (falling back to a local **SQLite** file if MySQL is unavailable), and can **connect to Gmail** over IMAP/SMTP for fetch and test sends.
+A Flask web app that flags potentially bullying language in email text, with an academic / university-email focus. It combines **TF–IDF + machine learning** (logistic regression or linear SVM) with **phrase-based rules**, and stores results in **MySQL** where configured — otherwise falling back automatically to a local **SQLite** file, so the app runs with no external database. It can also optionally **connect to Gmail** over IMAP/SMTP to fetch messages for analysis.
 
 ## Features
 
@@ -56,7 +56,7 @@ These steps get the app running locally with **zero external dependencies** — 
 
 6. **Open the app** — go to [http://localhost:5000](http://localhost:5000). The landing page links to login and the dashboard.
 
-7. **Log in** with the demo credentials (change before any real deployment): `admin` / `admin123` — also printed in the console on startup. The password is stored as a salted `scrypt` hash (via `werkzeug.security`), never in plaintext.
+7. **Log in** with the default credentials: `admin` / `admin123`. **Change these before any real deployment.** The password is never stored in plaintext — it is held as a salted `scrypt` hash via `werkzeug.security`, and is not printed to the console or displayed in the UI.
 
 8. **(Optional) Generate a dataset and train a model** from the dashboard UI (Generate Dataset → Train Model), or run `python evaluate_model.py` for an offline evaluation — see [Model evaluation](#model-evaluation) below.
 
@@ -69,6 +69,7 @@ python evaluate_model.py
 ```
 
 Outputs:
+
 - `static/confusion_matrix.png` — SVM confusion matrix
 - `static/model_comparison.png` — accuracy/precision/recall/F1 comparison
 - `saved_models/latest_model.joblib` and `saved_models/latest_vectorizer.joblib` — the higher-F1 model of the two
@@ -76,14 +77,15 @@ Outputs:
 ## Project layout
 
 | Path | Role |
-|------|------|
+| ------ | ------ |
 | `app.py` | Flask app, ML pipeline, email integration, API routes, MySQL/SQLite DB layer |
 | `evaluate_model.py` | Standalone SVM vs. Logistic Regression evaluation + plotting script |
 | `database_setup.sql` | Optional MySQL schema / sample data |
 | `requirements.txt` | Python dependencies |
 | `templates/` | `index.html`, `login.html`, `dashboard.html` |
-| `saved_models/` | Created at runtime for `joblib` models |
-| `datasets/` | Created at runtime for generated `.xlsx` files |
+| `static/` | Static assets; evaluation plots are written here by `evaluate_model.py` |
+| `saved_models/` | Trained `joblib` models and vectorisers (ships with pre-trained models; new ones added at runtime) |
+| `datasets/` | Ships with `large_email_dataset.xlsx`; further `.xlsx` datasets generated at runtime |
 
 ## Disclaimer
 
